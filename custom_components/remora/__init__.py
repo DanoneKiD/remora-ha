@@ -29,22 +29,15 @@ async def async_setup(hass, config) -> bool:
     host = conf[CONF_HOST]
     remora = RemoraDevice(host)
     hass.data[DOMAIN] = remora
-    # It doesn't really matter why we're not able to get the status,
-    # just that we can't.
-    try:
-        is_ok = await remora.async_check_HeartBeat()
-        if not is_ok:
-            _LOGGER.error("Failure while testing Remora device. HeartBeat != 200 OK")
-            return False    
-        # Load mandatory elments for remora
-        await remora.async_updateAllFilPilote()
-        await remora.async_updateRelais()
-        # Load optional elements for remora (ie TeleInfo)
-        await remora.async_updateTeleInfo()
-        # must add keyword param no_throttle=True
-    except Exception:  # pylint: disable=broad-except
-        _LOGGER.exception("Failure while testing Remora device.")
-        return False
+    # The board reboots on its own every few hours and refuses connections for
+    # about 30 s: never fail the setup because of it, the entities start as
+    # unavailable and recover at the next successful poll.
+    if not await remora.async_check_HeartBeat():
+        _LOGGER.warning("Remora %s not reachable at startup, entities stay unavailable until it answers", host)
+    await remora.async_updateAllFilPilote()
+    await remora.async_updateRelais()
+    # Optional elements (ie TeleInfo)
+    await remora.async_updateTeleInfo()
 
     async def async_reset(service):
         await hass.data[DOMAIN].async_reset()

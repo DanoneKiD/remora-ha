@@ -76,7 +76,8 @@ class RemoraFilPiloteClimate(ClimateEntity):
         self._fpnum = fpnum
         self._fp = FP + str(fpnum)
         self._name = fpname
-        self._preset_mode = self._remora.FilPiloteDic[self._fp].name
+        self._preset_mode = self._fp_mode_name()
+        self._attr_unique_id = f"remora_{remoraDevice.host}_{self._fp}"
         self._temp_sensor_id = temp_sensor_id
         self._cur_temp = None
 
@@ -111,6 +112,18 @@ class RemoraFilPiloteClimate(ClimateEntity):
         except ValueError as ex:
             _LOGGER.error("Unable to update from sensor: %s", ex)
 
+    def _fp_mode_name(self):
+        dic = self._remora.FilPiloteDic
+        if not dic or self._fp not in dic:
+            return None
+        name = dic[self._fp].name
+        # Modes the integration does not map (Délestage, Eco1, Eco2) keep the last known one
+        return name if name in REMORA_FP_PRESET_MODES_TO_HVAC_MODE else getattr(self, "_preset_mode", None)
+
+    @property
+    def available(self) -> bool:
+        return self._remora.available and self._preset_mode is not None
+
     @property
     def should_poll(self) -> bool:
         """Return the polling state."""
@@ -129,7 +142,7 @@ class RemoraFilPiloteClimate(ClimateEntity):
     @property
     def hvac_mode(self) -> str:
         """Return current operation ie. heat, cool, idle."""
-        return REMORA_FP_PRESET_MODES_TO_HVAC_MODE[self._preset_mode]
+        return REMORA_FP_PRESET_MODES_TO_HVAC_MODE.get(self._preset_mode)
 
     @property
     def hvac_modes(self) -> list:
@@ -163,19 +176,31 @@ class RemoraFilPiloteClimate(ClimateEntity):
 
     async def async_set_preset_mode(self, preset_mode) -> None:
         await self._remora.async_set_FilPilote(self._fpnum, remora.FpMode[preset_mode])
-        self._preset_mode = preset_mode
+        self._preset_mode = self._fp_mode_name() or preset_mode
         self.async_schedule_update_ha_state()
 
     async def async_update(self) -> None:
         await self._remora.async_updateAllFilPilote()
-        self._preset_mode = self._remora.FilPiloteDic[self._fp].name
+        self._preset_mode = self._fp_mode_name()
 
 
 class RemoraRelaisClimate(ClimateEntity):
     def __init__(self, remoraDevice):
         self._remora = remoraDevice
-        self._relais_etat = self._remora.RelaisDic[RELAIS].name
-        self._relais_mode = self._remora.RelaisDic[FNCT_RELAIS].name
+        self._relais_etat = None
+        self._relais_mode = None
+        self._attr_unique_id = f"remora_{remoraDevice.host}_relais"
+        self._read_relais()
+
+    def _read_relais(self):
+        dic = self._remora.RelaisDic
+        if dic:
+            self._relais_etat = dic[RELAIS].name
+            self._relais_mode = dic[FNCT_RELAIS].name
+
+    @property
+    def available(self) -> bool:
+        return self._remora.available and self._relais_etat is not None
 
     @property
     def should_poll(self) -> bool:
@@ -190,7 +215,7 @@ class RemoraRelaisClimate(ClimateEntity):
     @property
     def hvac_mode(self) -> str:
         """Return current operation ie. heat, of."""
-        return REMORA_RELAIS_ETAT_TO_HVAC_MODE[self._relais_etat]
+        return REMORA_RELAIS_ETAT_TO_HVAC_MODE.get(self._relais_etat)
 
     @property
     def hvac_modes(self) -> list:
@@ -235,10 +260,9 @@ class RemoraRelaisClimate(ClimateEntity):
 
     async def async_set_preset_mode(self, preset_mode) -> None:
         await self._remora.async_set_ModeRelais(remora.RelaisMode[preset_mode])
-        self._preset_mode = preset_mode
+        self._relais_mode = preset_mode
         self.async_schedule_update_ha_state()
 
     async def async_update(self) -> None:
         await self._remora.async_updateRelais()
-        self._relais_etat = self._remora.RelaisDic[RELAIS].name
-        self._relais_mode = self._remora.RelaisDic[FNCT_RELAIS].name
+        self._read_relais()
